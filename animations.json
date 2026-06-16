@@ -1,0 +1,156 @@
+{
+  "awoken": [
+    {
+      "spritesheet": "animations/awoken/1/spritesheet.png",
+      "atlas": "animations/awoken/1/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/awoken/2/spritesheet.png",
+      "atlas": "animations/awoken/2/spritesheet.json"
+    }
+  ],
+  "being_pet": [
+    {
+      "spritesheet": "animations/being_pet/1/spritesheet.png",
+      "atlas": "animations/being_pet/1/spritesheet.json"
+    }
+  ],
+  "dancing": [
+    {
+      "spritesheet": "animations/dancing/1/spritesheet.png",
+      "atlas": "animations/dancing/1/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/dancing/2/spritesheet.png",
+      "atlas": "animations/dancing/2/spritesheet.json"
+    }
+  ],
+  "dozing_off": [
+    {
+      "spritesheet": "animations/dozing_off/1/spritesheet.png",
+      "atlas": "animations/dozing_off/1/spritesheet.json"
+    }
+  ],
+  "fly": [
+    {
+      "spritesheet": "animations/fly/1/spritesheet.png",
+      "atlas": "animations/fly/1/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/fly/2/spritesheet.png",
+      "atlas": "animations/fly/2/spritesheet.json"
+    }
+  ],
+  "hop": [
+    {
+      "spritesheet": "animations/hop/1/spritesheet.png",
+      "atlas": "animations/hop/1/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/hop/2/spritesheet.png",
+      "atlas": "animations/hop/2/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/hop/3/spritesheet.png",
+      "atlas": "animations/hop/3/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/hop/4/spritesheet.png",
+      "atlas": "animations/hop/4/spritesheet.json"
+    }
+  ],
+  "idle": [
+    {
+      "spritesheet": "animations/idle/1/spritesheet.png",
+      "atlas": "animations/idle/1/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/idle/2/spritesheet.png",
+      "atlas": "animations/idle/2/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/idle/3/spritesheet.png",
+      "atlas": "animations/idle/3/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/idle/4/spritesheet.png",
+      "atlas": "animations/idle/4/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/idle/5/spritesheet.png",
+      "atlas": "animations/idle/5/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/idle/6/spritesheet.png",
+      "atlas": "animations/idle/6/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/idle/7/spritesheet.png",
+      "atlas": "animations/idle/7/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/idle/8/spritesheet.png",
+      "atlas": "animations/idle/8/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/idle/9/spritesheet.png",
+      "atlas": "animations/idle/9/spritesheet.json"
+    }
+  ],
+  "landing": [
+    {
+      "spritesheet": "animations/landing/1/spritesheet.png",
+      "atlas": "animations/landing/1/spritesheet.json"
+    }
+  ],
+  "pecking": [
+    {
+      "spritesheet": "animations/pecking/1/spritesheet.png",
+      "atlas": "animations/pecking/1/spritesheet.json"
+    }
+  ],
+  "short_flap": [
+    {
+      "spritesheet": "animations/short_flap/1/spritesheet.png",
+      "atlas": "animations/short_flap/1/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/short_flap/2/spritesheet.png",
+      "atlas": "animations/short_flap/2/spritesheet.json"
+    }
+  ],
+  "singing": [
+    {
+      "spritesheet": "animations/singing/1/spritesheet.png",
+      "atlas": "animations/singing/1/spritesheet.json"
+    }
+  ],
+  "takeoff": [
+    {
+      "spritesheet": "animations/takeoff/1/spritesheet.png",
+      "atlas": "animations/takeoff/1/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/takeoff/2/spritesheet.png",
+      "atlas": "animations/takeoff/2/spritesheet.json"
+    }
+  ],
+  "turnaround": [
+    {
+      "spritesheet": "animations/turnaround/1/spritesheet.png",
+      "atlas": "animations/turnaround/1/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/turnaround/2/spritesheet.png",
+      "atlas": "animations/turnaround/2/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/turnaround/3/spritesheet.png",
+      "atlas": "animations/turnaround/3/spritesheet.json"
+    },
+    {
+      "spritesheet": "animations/turnaround/4/spritesheet.png",
+      "atlas": "animations/turnaround/4/spritesheet.json"
+    }
+  ]
+}
