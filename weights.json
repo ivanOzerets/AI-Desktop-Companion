@@ -1,5 +1,5 @@
 {
-  "idle":             30,
+  "idle":             50,
   "pecking":          10,
   "dozing_off":        0,
   "sleeping":          0,
@@ -7,6 +7,6 @@
   "yawning":           0,
   "fly":              15,
   "flapping_in_place": 0,
-  "hop":              15,
+  "hop":              40,
   "turnaround":        5
 }
