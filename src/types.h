@@ -23,10 +23,17 @@ const int   HOP_STEP_PX          = 8;
 const int   SLEEP_INACTIVITY_SECS = 180;
 const float TAKEOFF_LIFTOFF_FRAC  = 0.25f;
 const float LANDING_TOUCHDOWN_FRAC = 0.65f;
-const int   LEDGE_MIN_AIR_ROWS    = 60;
-const int   LEDGE_EDGE_THRESHOLD  = 15;
-const int   LEDGE_UNIFORM_THRESHOLD = 15;
-const int   LEDGE_MIN_SURFACE_WIDTH = W;
+const float FOOT_Y                = 0.85f;
+const int   LEDGE_MIN_AIR_ROWS       = 30;
+const int   LEDGE_EDGE_THRESHOLD     = 15;
+const int   LEDGE_UNIFORM_THRESHOLD  = 15;
+const int   LEDGE_MIN_SURFACE_WIDTH  = W;
+const int   LEDGE_WIDTH_TOLERANCE    = 20;  // brightness tolerance for surface width scan
+const int   LEDGE_VALIDITY_DRIFT     = 20;  // per-pixel brightness change that flags drift
+const int   LEDGE_VALIDITY_MIN_CHANGES = 2; // how many drifted pixels trigger a re-fly
+
+const int   SLEEP_COOLDOWN_MS        = 60000; // cooldown after waking before sleep can re-trigger
+const int   WAKE_INPUT_RECENCY_SECS  = 5;     // max idle seconds to count as "recent input"
 
 struct Frame { int x, y, w, h; };
 

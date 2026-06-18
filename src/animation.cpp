@@ -39,7 +39,7 @@ float currentFootY() {
     if (bird.animations.count(bird.currentType) &&
         bird.currentVariantIdx < (int)bird.animations[bird.currentType].size())
         return bird.animations[bird.currentType][bird.currentVariantIdx].footY;
-    return 0.85f;
+    return FOOT_Y;
 }
 
 int animFrameCount(const std::string& type) {

@@ -24,31 +24,27 @@ risetime: 07:00
 
 ## Available Animations
 
-### Weight-Driven
-These animations are selected by the fast loop based on weights in weights.json.
+These are the animations whose weights you can adjust in weights.json. Internal sequence
+animations (takeoff, landing, fly loop, takeoff_turnaround) and event-driven overrides
+(being_pet) are managed automatically and should not be given weights here.
+
+### Weight-Driven (adjustable in weights.json)
 
 | Animation | Description |
 |---|---|
-| idle | Sitting still, occasional blink and head movement. Fast loop manages variants internally. |
+| idle | Sitting still, occasional blink and head movement. |
 | pecking | Periodic ground pecking. A calm resting behaviour. |
-| dozing_off | Transition animation into sleep. |
-| sleeping | Eyes closed, slow breathing. Loops until woken. |
-| awoken | Stretching, opening eyes. Plays after sleeping. |
+| hop | Short hop along the current ledge. |
+| turnaround | Flips facing direction on completion. |
+| dozing_off | Transition animation into sleep. Triggers the sleep sequence. |
+| sleeping | Eyes closed, slow breathing. Loops until inactivity ends. |
 | yawning | Brief tired expression. |
-| fly | Full flight sequence: takeoff → bezier path → landing. Fast loop calculates destination (edge-weighted) and curve. |
+| fly | Triggers a full flight to a new ledge. |
 | flapping_in_place | Hovering or excited flutter. |
-| startled | Short reactive jump/flutter. |
-| panicking | Sustained fear — erratic flapping, wide eyes. |
-| mad | Irritated expression. Decays back to baseline. |
-| scared | Cowering or puffed up. Decays with positive interactions. |
-| curious | Leaning forward, head tilting, observing. |
-| happy | Bouncing, tail wagging. |
 
-### Event-Driven
-These animations are never selected by the weight system. They are triggered only by specific events.
+### Event-Driven (never use weights for these)
 
 | Animation | Trigger |
 |---|---|
-| being_pet | Sustained gentle cursor hover over birb |
 | singing | Gentle music detected |
 | dancing | Upbeat music detected |

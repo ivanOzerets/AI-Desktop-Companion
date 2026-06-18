@@ -32,7 +32,10 @@ int findLedgeAtX(int x) {
     int ledgeY  = -1;
     int airRows = 0;
 
-    for (int y = 50; y < scanH - 1; y++) {
+    // scanStart: earliest Y where the bird can land without destY < 0 (window clipped off top)
+    int scanStart = std::max(1, (int)(FOOT_Y * H) - LEDGE_MIN_AIR_ROWS);
+
+    for (int y = scanStart; y < scanH - 1; y++) {
         auto lum = [](uint32_t c) {
             return ((c & 0xFF) + ((c >> 8) & 0xFF) + ((c >> 16) & 0xFF)) / 3;
         };
@@ -91,11 +94,11 @@ bool checkLedgeWidth(int centerX, int ledgeY, int minWidth) {
 
     int left = 0;
     for (int i = centerIdx - 1; i >= 0; i--) {
-        if (abs((int)lum(row[i]) - refLum) <= 20) left++; else break;
+        if (abs((int)lum(row[i]) - refLum) <= LEDGE_WIDTH_TOLERANCE) left++; else break;
     }
     int right = 0;
     for (int i = centerIdx + 1; i < rowW; i++) {
-        if (abs((int)lum(row[i]) - refLum) <= 20) right++; else break;
+        if (abs((int)lum(row[i]) - refLum) <= LEDGE_WIDTH_TOLERANCE) right++; else break;
     }
 
     SelectObject(memDC, oldBitmap);

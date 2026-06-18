@@ -3,19 +3,166 @@
 #include "ledge.h"
 #include "flight.h"
 #include "sleep.h"
+#include "bubble.h"
+#include "spotlight.h"
+#include "llm.h"
 #include <cstring>
 
-const UINT WM_TRAYICON  = WM_USER + 1;
-const UINT ID_TRAY_QUIT = 1001;
+const UINT WM_TRAYICON         = WM_USER + 1;
+const UINT ID_TRAY_QUIT        = 1001;
+const UINT ID_HOTKEY_SPOTLIGHT = 2;
 
 BirdState bird;
 
 // ---------------------------------------------------------------------------
+// updateHitTest
+// Runs every render frame. Maps the cursor position into sprite space and checks
+// the alpha channel so WM_NCHITTEST can decide click-through vs. interactive.
+// ---------------------------------------------------------------------------
+static void updateHitTest() {
+    POINT mp; GetCursorPos(&mp); ScreenToClient(bird.hwnd, &mp);
+    bird.mouseOverBird = false;
+    if (mp.x >= 0 && mp.x < W && mp.y >= 0 && mp.y < H &&
+        bird.animations.count(bird.currentType) &&
+        bird.currentVariantIdx < (int)bird.animations[bird.currentType].size() &&
+        bird.frameIndex < (int)bird.animations[bird.currentType][bird.currentVariantIdx].frames.size()) {
+        const Animation& anim = bird.animations[bird.currentType][bird.currentVariantIdx];
+        const Frame&     f    = anim.frames[bird.frameIndex];
+        int sx = f.x + mp.x * f.w / W;
+        int sy = f.y + mp.y * f.h / H;
+        uint8_t a = (anim.pixels[sy * anim.sheetW + sx] >> 24) & 0xFF;
+        bird.mouseOverBird = (a > 32);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// advanceAnimation
+// Called when the current animation's frames are exhausted (or the fly loop
+// finishes). Picks the next animation from the queue or weighted random, applies
+// facing changes on turnaround completions, handles landing bookkeeping, and
+// guards fly / hop / turnaround from firing while a speech bubble is active.
+// ---------------------------------------------------------------------------
+static void advanceAnimation() {
+    loadWeights();
+
+    if (bird.currentType == "turnaround" || bird.currentType == "takeoff_turnaround")
+        bird.facing = (bird.facing == FACING_RIGHT) ? FACING_LEFT : FACING_RIGHT;
+
+    if (bird.currentType == "landing") {
+        bird.flySequenceActive = false;
+        bird.hasLedge = true;
+        HDC screenDC = GetDC(NULL);
+        for (int i = 0; i < 3; i++)
+            bird.ledgeRefColors[i] = (uint32_t)GetPixel(screenDC, bird.winX + (i + 1) * W / 4, bird.ledgeY);
+        ReleaseDC(NULL, screenDC);
+        if (bird.isSleeping) {
+            bird.animQueue.clear();
+            bird.animQueue.push_back("dozing_off");
+            bird.animQueue.push_back("sleeping");
+        }
+    }
+
+    // Loop sleeping animation while in sleep state
+    if (bird.currentType == "sleeping" && bird.isSleeping)
+        bird.animQueue.push_front("sleeping");
+
+    std::string nextType;
+    if (!bird.animQueue.empty()) {
+        nextType = bird.animQueue.front(); bird.animQueue.pop_front();
+    } else {
+        nextType = pickAnimation();
+    }
+
+    if (nextType == "fly" && !bird.flySequenceActive) {
+        if (isBubbleActive()) {
+            nextType = pickAnimation();
+        } else {
+            startFlySequence();           // handles takeoff_turnaround facing logic
+            nextType = bird.currentType;  // "takeoff" or "takeoff_turnaround"
+        }
+    }
+
+    // Hop and turnaround move the bird — skip them while a bubble is showing
+    if (isBubbleActive() && (nextType == "hop" || nextType == "turnaround"))
+        nextType = "idle";
+
+    if (nextType != "fly" && (!bird.animations.count(nextType) || bird.animations[nextType].empty()))
+        nextType = pickAnimation();
+
+    bird.currentType       = nextType;
+    bird.currentVariantIdx = pickVariant(bird.currentType);
+
+    if (bird.currentType == "hop" && bird.animations.count("hop") &&
+        bird.currentVariantIdx < (int)bird.animations["hop"].size()) {
+        int airborneCount = 0;
+        for (bool a : bird.animations["hop"][bird.currentVariantIdx].airborne)
+            if (a) airborneCount++;
+        int hopDist    = airborneCount * HOP_STEP_PX;
+        int destCenter = bird.winX + W / 2 + (bird.facing == FACING_RIGHT ? hopDist : -hopDist);
+        int leadEdge   = destCenter + (bird.facing == FACING_RIGHT ? (W/2 - 10) : -(W/2 - 10));
+        if (!checkLedgeWidth(destCenter, bird.ledgeY, W) ||
+            !checkLedgeWidth(leadEdge, bird.ledgeY, 20)) {
+            bird.currentType       = "idle";
+            bird.currentVariantIdx = pickVariant("idle");
+        }
+    }
+
+    bird.frameIndex = 0;
+}
+
+// ---------------------------------------------------------------------------
+// renderFrame
+// Runs at TARGET_FPS. Moves the window along the bezier if in-flight, then
+// scales and blits the current sprite frame to the layered window.
+// ---------------------------------------------------------------------------
+static void renderFrame() {
+    if (!bird.animations.count(bird.currentType) || bird.animations[bird.currentType].empty()) {
+        bird.currentType = pickAnimation(); bird.currentVariantIdx = 0; bird.frameIndex = 0;
+    }
+    if (bird.currentVariantIdx >= (int)bird.animations[bird.currentType].size())
+        bird.currentVariantIdx = 0;
+    if (bird.frameIndex >= (int)bird.animations[bird.currentType][bird.currentVariantIdx].frames.size())
+        bird.frameIndex = 0;
+
+    const Animation& anim = bird.animations[bird.currentType][bird.currentVariantIdx];
+
+    bool inFlight = bird.flySequenceActive &&
+        (bird.currentType == "takeoff" || bird.currentType == "takeoff_turnaround" ||
+         bird.currentType == "fly"     || bird.currentType == "landing");
+    if (inFlight) {
+        int fTotal = (int)anim.frames.size();
+        float gt = flightGlobalT(bird.currentType, bird.frameIndex, fTotal);
+        bezierAt(gt, bird.winX, bird.winY);
+    }
+
+    presentFrame(anim, bird.frameIndex, bird.facing, bird.winX, bird.winY);
+    tickBubble();
+}
+
+// ---------------------------------------------------------------------------
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_LLM_RESPONSE) {
+        LlmResponse* resp = reinterpret_cast<LlmResponse*>(lp);
+        if (!resp->speech.empty()) showBubble(resp->speech);
+        if (resp->action == "fly") {
+            bird.isSleeping = false;
+            bird.animQueue.clear();
+            startFlySequence();
+        } else if (resp->action == "sleep") {
+            enterSleep();
+        }
+        delete resp;
+        return 0;
+    }
     if (msg == WM_DESTROY) {
+        UnregisterHotKey(hwnd, ID_HOTKEY_SPOTLIGHT);
         Shell_NotifyIcon(NIM_DELETE, &bird.trayIcon);
         PostQuitMessage(0);
+        return 0;
+    }
+    if (msg == WM_HOTKEY && wp == ID_HOTKEY_SPOTLIGHT) {
+        toggleSpotlight();
         return 0;
     }
     if (msg == WM_TRAYICON && lp == WM_RBUTTONUP) {
@@ -67,10 +214,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     if (msg == WM_LBUTTONUP) {
         if (!bird.flySequenceActive) {
-            // Click always triggers fly regardless of time of day
             bird.isSleeping = false;
-            bird.sleepCooldownEnd = GetTickCount() + 60000;
+            bird.sleepCooldownEnd = GetTickCount() + SLEEP_COOLDOWN_MS;
             bird.animQueue.clear();
+            hideBubble();
             startFlySequence();
             bird.companionTracker = CompanionTracker{};
         }
@@ -93,8 +240,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     wc.lpszClassName = "AiDesktopCompanion";
     RegisterClassEx(&wc);
 
-    bird.winX = W;
-    bird.winY = bird.screenH - H - 40;
+    bird.winX = -W;
+    bird.winY = bird.screenH / 2;
 
     bird.hwnd = CreateWindowEx(
         WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
@@ -132,18 +279,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     strcpy(bird.trayIcon.szTip, "AI Desktop Companion");
     Shell_NotifyIcon(NIM_ADD, &bird.trayIcon);
 
+    initBubble(hInstance);
+    initSpotlight(hInstance, bird.hwnd);
+    initLlm();
+    RegisterHotKey(bird.hwnd, ID_HOTKEY_SPOTLIGHT, MOD_CONTROL | MOD_SHIFT, VK_SPACE);
+
     loadWeights();
     loadAnimations();
     loadIdentityTimes();
 
-    bird.currentType       = pickAnimation();
-    bird.currentVariantIdx = pickVariant(bird.currentType);
-    bird.frameIndex        = 0;
+    startFlySequence();  // fly in from off-screen on first launch
 
     uint32_t lastTime     = GetTickCount();
     uint32_t lastAnimTick = lastTime;
-    MSG  winMsg  = {};
-    bool running = true;
+    MSG      winMsg       = {};
+    bool     running      = true;
 
     while (running) {
         while (PeekMessage(&winMsg, NULL, 0, 0, PM_REMOVE)) {
@@ -154,24 +304,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
         uint32_t now = GetTickCount();
 
-        // --- Pixel hit test ---
-        {
-            POINT mp; GetCursorPos(&mp); ScreenToClient(bird.hwnd, &mp);
-            bird.mouseOverBird = false;
-            if (mp.x >= 0 && mp.x < W && mp.y >= 0 && mp.y < H &&
-                bird.animations.count(bird.currentType) &&
-                bird.currentVariantIdx < (int)bird.animations[bird.currentType].size() &&
-                bird.frameIndex < (int)bird.animations[bird.currentType][bird.currentVariantIdx].frames.size()) {
-                const Animation& anim = bird.animations[bird.currentType][bird.currentVariantIdx];
-                const Frame&     f    = anim.frames[bird.frameIndex];
-                int sx = f.x + mp.x * f.w / W;
-                int sy = f.y + mp.y * f.h / H;
-                uint8_t a = (anim.pixels[sy * anim.sheetW + sx] >> 24) & 0xFF;
-                bird.mouseOverBird = (a > 32);
-            }
-        }
+        updateHitTest();
 
-        // --- Animation tick ---
+        // Animation tick — runs at ANIM_FPS (ground) or FLY_ANIM_FPS (in-flight)
         uint32_t tickInterval = bird.flySequenceActive
             ? (uint32_t)(1000.0f / FLY_ANIM_FPS)
             : (uint32_t)bird.animInterval;
@@ -181,6 +316,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             updateSleepState();
             bird.frameIndex++;
 
+            // Move window sideways on airborne hop frames
             if (bird.currentType == "hop" && !bird.flySequenceActive &&
                 bird.animations.count("hop") &&
                 bird.currentVariantIdx < (int)bird.animations["hop"].size()) {
@@ -191,8 +327,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
                 }
             }
 
+            // Track fly-loop progress; only transition once the loop count is satisfied
             bool transition = false;
-
             if (bird.currentType == "fly" && bird.flySequenceActive) {
                 bird.flyState.flyFramesPlayed++;
                 if (bird.flyState.flyFramesPlayed < bird.flyState.flyTotalFrames) {
@@ -204,92 +340,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             }
 
             if (transition || bird.frameIndex >= (int)bird.animations[bird.currentType][bird.currentVariantIdx].frames.size()) {
-                loadWeights();
-
-                if (bird.currentType == "turnaround" || bird.currentType == "takeoff_turnaround")
-                    bird.facing = (bird.facing == FACING_RIGHT) ? FACING_LEFT : FACING_RIGHT;
-                if (bird.currentType == "landing") {
-                    bird.flySequenceActive = false;
-                    bird.hasLedge = true;
-                    HDC screenDC = GetDC(NULL);
-                    for (int i = 0; i < 3; i++)
-                        bird.ledgeRefColors[i] = (uint32_t)GetPixel(screenDC, bird.winX + (i + 1) * W / 4, bird.ledgeY);
-                    ReleaseDC(NULL, screenDC);
-                    // Forced to fly during night sleep (ledge disappeared) — settle back to sleep
-                    if (bird.isSleeping) {
-                        bird.animQueue.clear();
-                        bird.animQueue.push_back("dozing_off");
-                        bird.animQueue.push_back("sleeping");
-                    }
-                }
-
-                // Loop sleeping animation while in sleep state
-                if (bird.currentType == "sleeping" && bird.isSleeping)
-                    bird.animQueue.push_front("sleeping");
-
-                std::string nextType;
-                if (!bird.animQueue.empty()) {
-                    nextType = bird.animQueue.front(); bird.animQueue.pop_front();
-                } else {
-                    nextType = pickAnimation();
-                }
-
-                if (nextType == "fly" && !bird.flySequenceActive) {
-                    planFly();
-                    bird.flySequenceActive = true;
-                    bird.animQueue.push_front("landing");
-                    if (bird.flyState.flyTotalFrames > 0) bird.animQueue.push_front("fly");
-                    nextType = "takeoff";
-                } else if (nextType != "fly" &&
-                           (!bird.animations.count(nextType) || bird.animations[nextType].empty())) {
-                    nextType = pickAnimation();
-                }
-
-                bird.currentType       = nextType;
-                bird.currentVariantIdx = pickVariant(bird.currentType);
-
-                if (bird.currentType == "hop" && bird.animations.count("hop") &&
-                    bird.currentVariantIdx < (int)bird.animations["hop"].size()) {
-                    int airborneCount = 0;
-                    for (bool a : bird.animations["hop"][bird.currentVariantIdx].airborne)
-                        if (a) airborneCount++;
-                    int hopDist    = airborneCount * HOP_STEP_PX;
-                    int destCenter = bird.winX + W / 2 + (bird.facing == FACING_RIGHT ? hopDist : -hopDist);
-                    if (!checkLedgeWidth(destCenter, bird.ledgeY, W)) {
-                        bird.currentType       = "idle";
-                        bird.currentVariantIdx = pickVariant("idle");
-                    }
-                }
-
-                bird.frameIndex = 0;
+                advanceAnimation();
                 break;
             }
         }
 
-        // --- Render frame ---
         if (now - lastTime >= (uint32_t)(1000 / TARGET_FPS)) {
             lastTime = now;
-
-            if (!bird.animations.count(bird.currentType) || bird.animations[bird.currentType].empty()) {
-                bird.currentType = pickAnimation(); bird.currentVariantIdx = 0; bird.frameIndex = 0;
-            }
-            if (bird.currentVariantIdx >= (int)bird.animations[bird.currentType].size())
-                bird.currentVariantIdx = 0;
-            if (bird.frameIndex >= (int)bird.animations[bird.currentType][bird.currentVariantIdx].frames.size())
-                bird.frameIndex = 0;
-
-            const Animation& anim = bird.animations[bird.currentType][bird.currentVariantIdx];
-
-            bool inFlight = bird.flySequenceActive &&
-                (bird.currentType == "takeoff" || bird.currentType == "takeoff_turnaround" ||
-                 bird.currentType == "fly"     || bird.currentType == "landing");
-            if (inFlight) {
-                int fTotal = (int)anim.frames.size();
-                float gt = flightGlobalT(bird.currentType, bird.frameIndex, fTotal);
-                bezierAt(gt, bird.winX, bird.winY);
-            }
-
-            presentFrame(anim, bird.frameIndex, bird.facing, bird.winX, bird.winY);
+            renderFrame();
         }
 
         Sleep(1);

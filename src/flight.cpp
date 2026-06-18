@@ -4,6 +4,12 @@
 #include <cmath>
 #include <algorithm>
 
+static const int   FLY_SCAN_ATTEMPTS    = 15;    // random X positions tried when looking for a landing spot
+static const int   FLY_FALLBACK_ATTEMPTS = 10;   // attempts to find a distant-enough taskbar fallback position
+static const float FLY_CTRL_HEIGHT_MAX  = 200.0f; // maximum arc height above the midpoint
+static const float FLY_CTRL_HEIGHT_FRAC = 0.3f;  // arc height as a fraction of flight distance
+static const float FLY_PIXELS_PER_LOOP  = 700.0f; // screen pixels of distance per one fly-loop cycle
+
 float flightGlobalT(const std::string& phase, int fIdx, int fTotal) {
     float frac = fTotal > 1 ? (float)fIdx / (fTotal - 1) : 1.0f;
 
@@ -40,11 +46,15 @@ void planFly() {
     RECT workArea;
     SystemParametersInfo(SPI_GETWORKAREA, 0, &workArea, 0);
 
+    // Use idle's foot_y so the landing bezier ends where idle stance expects — no snap on transition.
+    float groundFootY = bird.animations.count("idle") && !bird.animations["idle"].empty()
+        ? bird.animations["idle"][0].footY : FOOT_Y;
+
     float dx = 0, dy = 0, dist = 0;
     bool found = false;
 
     std::uniform_int_distribution<int> xDist(W / 2, bird.screenW - W / 2);
-    for (int i = 0; i < 15 && !found; i++) {
+    for (int i = 0; i < FLY_SCAN_ATTEMPTS && !found; i++) {
         int scanX = xDist(bird.rng);
         if (scanX >= bird.winX && scanX < bird.winX + W) continue;
 
@@ -54,10 +64,6 @@ void planFly() {
         if (!checkLedgeWidth(scanX, ledgeY, LEDGE_MIN_SURFACE_WIDTH)) continue;
 
         float destX = (float)(scanX - W / 2);
-        // Use idle's foot_y as the ground reference so the landing bezier ends
-        // at the same position idle expects — eliminates the snap on transition.
-        float groundFootY = bird.animations.count("idle") && !bird.animations["idle"].empty()
-            ? bird.animations["idle"][0].footY : 0.82f;
         float destY = (float)(ledgeY - (int)(groundFootY * H));
         bird.ledgeY = ledgeY;
         destX = std::max(0.0f, std::min(destX, (float)(bird.screenW - W)));
@@ -75,8 +81,6 @@ void planFly() {
     }
 
     if (!found) {
-        float groundFootY = bird.animations.count("idle") && !bird.animations["idle"].empty()
-            ? bird.animations["idle"][0].footY : 0.82f;
         int attempts = 0;
         do {
             bird.flyState.destX = std::uniform_real_distribution<float>(0, (float)(bird.screenW - W))(bird.rng);
@@ -86,10 +90,10 @@ void planFly() {
             dy   = bird.flyState.destY - bird.flyState.startY;
             dist = sqrtf(dx * dx + dy * dy);
             attempts++;
-        } while (dist < FLY_MIN_DISTANCE && attempts < 10);
+        } while (dist < FLY_MIN_DISTANCE && attempts < FLY_FALLBACK_ATTEMPTS);
     }
 
-    float arcH = std::min(200.0f, dist * 0.3f);
+    float arcH = std::min(FLY_CTRL_HEIGHT_MAX, dist * FLY_CTRL_HEIGHT_FRAC);
     bird.flyState.ctrlX = (bird.flyState.startX + bird.flyState.destX) / 2.0f;
     bird.flyState.ctrlY = std::min(bird.flyState.startY, bird.flyState.destY) - arcH;
     bird.flyState.ctrlY = std::max(bird.flyState.ctrlY, 0.0f);
@@ -104,7 +108,7 @@ void planFly() {
         bird.flyState.takeoffEnd      = 0.5f;
         bird.flyState.landingStart    = 0.5f;
     } else {
-        int n = std::max(1, (int)((dist - FLY_SHORT_THRESHOLD) / 700.0f));
+        int n = std::max(1, (int)((dist - FLY_SHORT_THRESHOLD) / FLY_PIXELS_PER_LOOP));
         bird.flyState.flyTotalFrames = n * flF;
         int total = tfF + bird.flyState.flyTotalFrames + ldF;
         bird.flyState.takeoffEnd   = (float)tfF / total;
@@ -142,11 +146,11 @@ void checkLedgeValidity() {
     int changed = 0;
     for (int i = 0; i < 3; i++) {
         uint32_t cur = (uint32_t)GetPixel(screenDC, bird.winX + (i + 1) * W / 4, bird.ledgeY);
-        if (abs((int)lum(cur) - (int)lum(bird.ledgeRefColors[i])) > 20) changed++;
+        if (abs((int)lum(cur) - (int)lum(bird.ledgeRefColors[i])) > LEDGE_VALIDITY_DRIFT) changed++;
     }
     ReleaseDC(NULL, screenDC);
 
-    if (changed >= 2) {
+    if (changed >= LEDGE_VALIDITY_MIN_CHANGES) {
         bird.hasLedge = false;
         bird.animQueue.clear();
         bird.flySequenceActive = false;

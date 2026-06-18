@@ -1,10 +1,10 @@
 CXX      = g++
 TARGET   = ai-desktop-companion.exe
-SRCS     = src/main.cpp src/animation.cpp src/ledge.cpp src/flight.cpp src/sleep.cpp
+SRCS     = src/main.cpp src/animation.cpp src/ledge.cpp src/flight.cpp src/sleep.cpp src/bubble.cpp src/spotlight.cpp src/llm.cpp
 OBJS     = $(SRCS:.cpp=.o)
 INCLUDES = -I lib/json
 CXXFLAGS = -std=c++17 $(INCLUDES)
-LIBS     = -mwindows
+LIBS     = -mwindows -lwinhttp
 
 $(TARGET): $(OBJS)
 	$(CXX) $(OBJS) -o $(TARGET) $(LIBS)
