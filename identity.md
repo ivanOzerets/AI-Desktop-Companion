@@ -16,6 +16,12 @@ Curious and alert. Settling in.
 
 ---
 
+## Schedule
+bedtime: 22:00
+risetime: 07:00
+
+---
+
 ## Available Animations
 
 ### Weight-Driven

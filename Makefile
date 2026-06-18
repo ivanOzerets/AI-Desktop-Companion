@@ -1,15 +1,19 @@
-CXX = g++
-TARGET = ai-desktop-companion.exe
-SRC = src/main.cpp
-
+CXX      = g++
+TARGET   = ai-desktop-companion.exe
+SRCS     = src/main.cpp src/animation.cpp src/ledge.cpp src/flight.cpp src/sleep.cpp
+OBJS     = $(SRCS:.cpp=.o)
 INCLUDES = -I lib/json
-LIBS = -mwindows
+CXXFLAGS = -std=c++17 $(INCLUDES)
+LIBS     = -mwindows
 
-$(TARGET): $(SRC)
-	$(CXX) $(SRC) -o $(TARGET) $(INCLUDES) $(LIBS) -std=c++17
+$(TARGET): $(OBJS)
+	$(CXX) $(OBJS) -o $(TARGET) $(LIBS)
+
+src/%.o: src/%.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 run: $(TARGET)
 	./$(TARGET)
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(OBJS)
