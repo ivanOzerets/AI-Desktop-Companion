@@ -74,12 +74,8 @@ static void advanceAnimation() {
     }
 
     if (nextType == "fly" && !bird.flySequenceActive) {
-        if (isBubbleActive()) {
-            nextType = pickAnimation();
-        } else {
-            startFlySequence();           // handles takeoff_turnaround facing logic
-            nextType = bird.currentType;  // "takeoff" or "takeoff_turnaround"
-        }
+        startFlySequence();           // handles takeoff_turnaround facing logic
+        nextType = bird.currentType;  // "takeoff" or "takeoff_turnaround"
     }
 
     // Hop and turnaround move the bird — skip them while a bubble is showing
@@ -146,13 +142,27 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         LlmResponse* resp = reinterpret_cast<LlmResponse*>(lp);
         if (!resp->speech.empty()) showBubble(resp->speech);
         if (resp->action == "fly") {
-            bird.isSleeping = false;
-            bird.animQueue.clear();
-            startFlySequence();
+            bird.animQueue.push_back("fly");
         } else if (resp->action == "sleep") {
-            enterSleep();
+            bird.animQueue.push_back("dozing_off");
+            bird.animQueue.push_back("sleeping");
+        } else if (resp->action == "dance") {
+            bird.animQueue.push_back("dancing");
+        } else if (resp->action == "sing") {
+            bird.animQueue.push_back("singing");
+        } else if (resp->action == "yawn") {
+            bird.animQueue.push_back("yawning");
+        } else if (resp->action == "flap") {
+            bird.animQueue.push_back("flapping_in_place");
         }
         delete resp;
+        return 0;
+    }
+    if (msg == WM_SLOW_LOOP_DONE) {
+        loadIdentityTimes();
+        std::string* speech = reinterpret_cast<std::string*>(lp);
+        if (speech && !speech->empty()) showBubble(*speech);
+        delete speech;
         return 0;
     }
     if (msg == WM_DESTROY) {
@@ -162,6 +172,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     if (msg == WM_HOTKEY && wp == ID_HOTKEY_SPOTLIGHT) {
+        wakeUp();
         toggleSpotlight();
         return 0;
     }
@@ -290,10 +301,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
     startFlySequence();  // fly in from off-screen on first launch
 
-    uint32_t lastTime     = GetTickCount();
-    uint32_t lastAnimTick = lastTime;
-    MSG      winMsg       = {};
-    bool     running      = true;
+    uint32_t lastTime      = GetTickCount();
+    uint32_t lastAnimTick  = lastTime;
+    uint32_t lastSlowLoop  = lastTime;
+    static const uint32_t SLOW_LOOP_INTERVAL = 5 * 60 * 1000;  // 5 minutes
+    MSG      winMsg        = {};
+    bool     running       = true;
 
     while (running) {
         while (PeekMessage(&winMsg, NULL, 0, 0, PM_REMOVE)) {
@@ -305,6 +318,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         uint32_t now = GetTickCount();
 
         updateHitTest();
+
+        // Slow loop — periodic self-reflection every 5 minutes
+        if (now - lastSlowLoop >= SLOW_LOOP_INTERVAL) {
+            lastSlowLoop = now;
+            runSlowLoop();
+        }
 
         // Animation tick — runs at ANIM_FPS (ground) or FLY_ANIM_FPS (in-flight)
         uint32_t tickInterval = bird.flySequenceActive

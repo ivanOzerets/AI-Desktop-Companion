@@ -19,10 +19,10 @@ static const int BUBBLE_FONT_SIZE   = 20;    // ← font size for bubble text
 static const int MAX_W              = 280;   // ← max bubble width before text wraps
 static const int PAD                = 10;    // ← internal padding inside the roundrect
 
-static const int CHAR_MS         = 15;   // ← ms per typewriter character reveal
+static const int CHAR_MS         = 10;   // ← ms per typewriter character reveal
 static const int FADE_MS         = 180;  // ← fade-in and fade-out duration (ms)
-static const int MAX_TEXT_LEN    = 200;  // ← messages longer than this are truncated
-static const int POST_REVEAL_MS  = 2000; // ← extra display time after last character is shown
+static const int MAX_TEXT_LEN    = 300;  // ← messages longer than this are truncated
+static const int POST_REVEAL_MS  = 5000; // ← extra display time after last character is shown
 
 // ── Thought-bubble circle chain ───────────────────────────────────────────────
 // Tune these to adjust the circles. TAIL_H is derived automatically.

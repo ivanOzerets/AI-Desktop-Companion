@@ -11,11 +11,16 @@
 
 using json = nlohmann::json;
 
-const UINT WM_LLM_RESPONSE = WM_USER + 2;
+const UINT WM_LLM_RESPONSE  = WM_USER + 2;
+const UINT WM_SLOW_LOOP_DONE = WM_USER + 3;
 
-static std::string       g_model     = "llama3.2:3b";
+static std::string       g_model     = "llama3.1:8b";
 static int               g_maxTokens = 200;
 static std::atomic<bool> g_pending   = false;
+
+static const int MAX_HISTORY = 6;  // number of past exchanges to keep (user+assistant pairs)
+struct HistoryEntry { std::string user; std::string assistant; };
+static std::vector<HistoryEntry> g_history;
 
 // ---------------------------------------------------------------------------
 // initLlm
@@ -47,14 +52,24 @@ static std::string buildSystemPrompt() {
           "Respond only as this bird — first person, in character, never break character.\n\n";
 
     ss << "STRICT FORMAT RULES:\n";
-    ss << "- Your entire response must be under " << g_maxTokens << " characters. Count carefully. This is a hard limit.\n";
+    ss << "- Your entire response must be under 300 characters. Count carefully. This is a hard limit.\n";
     ss << "- Plain speech only. No lists, no markdown, no asterisks, no quotation marks.\n";
     ss << "- Short and natural — a real thought, not an essay. Shorter is better.\n\n";
 
-    ss << "ACTIONS (optional — only use when clearly appropriate):\n";
-    ss << "If the user asks you to move/leave/fly/go away, put [fly] on the very first line, then your speech.\n";
-    ss << "If the user asks you to sleep/rest/nap, put [sleep] on the very first line, then your speech.\n";
-    ss << "Most replies need no action tag at all.\n\n";
+    ss << "ACTIONS — you can perform physical actions by including a tag in your response:\n";
+    ss << "[fly]   — user asks you to fly, move, leave, go away\n";
+    ss << "[sleep] — user asks you to sleep, rest, nap\n";
+    ss << "[dance] — user asks you to dance, groove, move to music\n";
+    ss << "[sing]  — user asks you to sing\n";
+    ss << "[flap]  — user asks you to flap, flutter, flap your wings\n";
+    ss << "Example: user says 'can you dance?' → you reply 'Sure, watch this! [dance]'\n";
+    ss << "Example: user says 'fly away' → you reply 'Fine, off I go! [fly]'\n";
+    ss << "Only include an action tag if the user is clearly asking for that action. Most replies have no action tag.\n\n";
+
+    ss << "MEMORY — if the user tells you something important (their name, a preference, a fact about themselves or you), include a remember tag:\n";
+    ss << "[remember: <fact>] — saves the fact permanently to your identity\n";
+    ss << "Example: user says 'my name is Ivan' → you reply 'Nice to meet you Ivan! [remember: user's name is Ivan]'\n";
+    ss << "Only remember genuinely important facts. Don't remember small talk.\n\n";
 
     // Personality and history from identity.md
     std::ifstream idf("identity.md");
@@ -73,7 +88,7 @@ static std::string buildSystemPrompt() {
     ss << "Idle for: "        << inactivitySeconds() << " seconds\n\n";
 
     // Restate the limit at the end — recency matters for small models
-    ss << "Remember: respond as this bird, under " << g_maxTokens << " characters, plain speech only.";
+    ss << "Remember: respond as this bird, under 300 characters, plain speech only. If the user asked you to perform an action, you MUST include the matching tag like [dance] or [fly] in your reply.";
 
     return ss.str();
 }
@@ -86,21 +101,80 @@ static std::string buildSystemPrompt() {
 // ---------------------------------------------------------------------------
 static LlmResponse parseResponse(const std::string& raw) {
     LlmResponse r;
-    r.speech = raw;
+    std::string text = raw;
 
-    if (!raw.empty() && raw[0] == '[') {
-        size_t close = raw.find(']');
-        if (close != std::string::npos) {
-            r.action = raw.substr(1, close - 1);
-            // lowercase the action so "[Fly]" works too
-            for (char& c : r.action) c = (char)tolower((unsigned char)c);
-            // strip leading whitespace/newlines from the speech portion
-            size_t start = raw.find_first_not_of(" \t\n\r", close + 1);
-            r.speech = (start != std::string::npos) ? raw.substr(start) : "";
+    // Scan all [...] tags, peel them out of speech one at a time
+    std::string cleaned;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t open = text.find('[', pos);
+        if (open == std::string::npos) { cleaned += text.substr(pos); break; }
+        cleaned += text.substr(pos, open - pos);
+        size_t close = text.find(']', open);
+        if (close == std::string::npos) { cleaned += text.substr(open); break; }
+
+        std::string tag = text.substr(open + 1, close - open - 1);
+        pos = close + 1;
+
+        // [remember: <fact>]
+        std::string tagLower = tag;
+        for (char& c : tagLower) c = (char)tolower((unsigned char)c);
+        if (tagLower.rfind("remember:", 0) == 0) {
+            size_t factStart = tag.find(':') + 1;
+            while (factStart < tag.size() && tag[factStart] == ' ') factStart++;
+            r.memory = tag.substr(factStart);
+        } else {
+            // action tag
+            if (r.action.empty()) {
+                r.action = tagLower;
+            }
         }
     }
 
+    // Trim whitespace from cleaned speech
+    size_t start = cleaned.find_first_not_of(" \t\n\r");
+    size_t end   = cleaned.find_last_not_of(" \t\n\r");
+    r.speech = (start != std::string::npos) ? cleaned.substr(start, end - start + 1) : "";
+
     return r;
+}
+
+// ---------------------------------------------------------------------------
+// appendMemory
+// Appends a remembered fact to the ## History section of identity.md.
+// ---------------------------------------------------------------------------
+static void appendMemory(const std::string& fact) {
+    if (fact.empty()) return;
+
+    // Read existing content
+    std::ifstream in("identity.md");
+    if (!in.is_open()) return;
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+
+    // Find ## History section and append after the first line of it
+    size_t pos = content.find("## History");
+    if (pos == std::string::npos) return;
+    size_t lineEnd = content.find('\n', pos);
+    if (lineEnd == std::string::npos) return;
+
+    // Skip past the placeholder line if it's "*No significant events yet...*"
+    size_t nextLine = lineEnd + 1;
+    if (content.substr(nextLine, 1) == "*") {
+        size_t placeholderEnd = content.find('\n', nextLine);
+        if (placeholderEnd != std::string::npos)
+            content.erase(nextLine, placeholderEnd - nextLine + 1);
+    }
+
+    // Insert the new fact on the line after ## History
+    SYSTEMTIME st; GetLocalTime(&st);
+    char dateBuf[32];
+    sprintf(dateBuf, "%04d-%02d-%02d", st.wYear, st.wMonth, st.wDay);
+    std::string entry = "- " + fact + " (" + dateBuf + ")\n";
+    content.insert(nextLine, entry);
+
+    std::ofstream out("identity.md");
+    out << content;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,13 +233,18 @@ static std::string httpPost(const std::string& path, const std::string& body) {
 // the message handler in main.cpp deletes it.
 // ---------------------------------------------------------------------------
 static void llmThread(std::string userMessage, std::string systemPrompt) {
+    json messages = json::array();
+    messages.push_back({{"role", "system"}, {"content", systemPrompt}});
+    for (const auto& h : g_history) {
+        messages.push_back({{"role", "user"},      {"content", h.user}});
+        messages.push_back({{"role", "assistant"}, {"content", h.assistant}});
+    }
+    messages.push_back({{"role", "user"}, {"content", userMessage}});
+
     json reqBody = {
-        {"model",  g_model},
-        {"stream", false},
-        {"messages", json::array({
-            {{"role", "system"}, {"content", systemPrompt}},
-            {{"role", "user"},   {"content", userMessage}}
-        })}
+        {"model",    g_model},
+        {"stream",   false},
+        {"messages", messages}
     };
 
     std::string raw = httpPost("/api/chat", reqBody.dump());
@@ -176,6 +255,13 @@ static void llmThread(std::string userMessage, std::string systemPrompt) {
             json j = json::parse(raw);
             std::string text = j["message"]["content"].get<std::string>();
             resp = parseResponse(text);
+            if (!resp.speech.empty()) {
+                g_history.push_back({userMessage, resp.speech});
+                if ((int)g_history.size() > MAX_HISTORY)
+                    g_history.erase(g_history.begin());
+            }
+            if (!resp.memory.empty())
+                appendMemory(resp.memory);
         } catch (...) {
             resp.speech = "(parse error)";
         }
@@ -199,6 +285,137 @@ void queryLlm(const std::string& userMessage) {
 
     g_pending = true;
     std::string sysPrompt = buildSystemPrompt();
-    showBubble("...");
+    showBubble("...", 60000);  // holds until real response replaces it
     std::thread(llmThread, userMessage, std::move(sysPrompt)).detach();
+}
+
+// ---------------------------------------------------------------------------
+// Slow loop — periodic self-reflection, no user message
+// ---------------------------------------------------------------------------
+
+// Replaces the body of a ## Section in identity.md with newBody.
+// Stops at the next ## heading or --- divider.
+static void replaceSection(const std::string& header, const std::string& newBody) {
+    std::ifstream in("identity.md");
+    if (!in.is_open()) return;
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+
+    size_t hPos = content.find(header);
+    if (hPos == std::string::npos) return;
+    size_t bodyStart = content.find('\n', hPos);
+    if (bodyStart == std::string::npos) return;
+    bodyStart++;
+
+    // Find where the section ends (next ## or ---)
+    size_t bodyEnd = content.size();
+    for (size_t p = bodyStart; p < content.size(); ) {
+        size_t nl = content.find('\n', p);
+        size_t lineEnd = (nl == std::string::npos) ? content.size() : nl + 1;
+        std::string line = content.substr(p, lineEnd - p);
+        if (line.substr(0, 2) == "##" || line.substr(0, 3) == "---") { bodyEnd = p; break; }
+        p = lineEnd;
+    }
+
+    content = content.substr(0, bodyStart) + newBody + "\n\n" + content.substr(bodyEnd);
+    std::ofstream out("identity.md");
+    out << content;
+}
+
+// Replaces the value on a line that starts with "key: " in identity.md.
+static void replaceLine(const std::string& key, const std::string& value) {
+    std::ifstream in("identity.md");
+    if (!in.is_open()) return;
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+
+    size_t pos = content.find(key + ":");
+    if (pos == std::string::npos) return;
+    size_t lineEnd = content.find('\n', pos);
+    content.replace(pos, lineEnd - pos, key + ": " + value);
+
+    std::ofstream out("identity.md");
+    out << content;
+}
+
+static std::atomic<bool> g_slowPending = false;
+
+static void slowLoopThread() {
+    std::ostringstream ss;
+    ss << "You are a small bird desktop companion having a quiet moment to yourself.\n";
+    ss << "Speak one spontaneous thought out loud — something on your mind right now. ";
+    ss << "Keep it short, natural, in character. Under 200 characters.\n\n";
+
+    std::ifstream idf("identity.md");
+    if (idf.is_open()) { ss << idf.rdbuf(); ss << "\n\n"; }
+
+    SYSTEMTIME st; GetLocalTime(&st);
+    ss << "Current time: " << st.wHour << ":" << (st.wMinute < 10 ? "0" : "") << st.wMinute << "\n";
+    ss << "Current animation: " << bird.currentType << "\n";
+    ss << "Idle for: " << inactivitySeconds() << " seconds\n\n";
+
+    ss << "You may also include update tags if something genuinely warrants changing:\n";
+    ss << "[mood: <text>]         — update Current Mood (one short sentence)\n";
+    ss << "[personality: <text>]  — update Personality (2-3 sentences)\n";
+    ss << "[bedtime: HH:MM]       — update sleep schedule\n";
+    ss << "[risetime: HH:MM]      — update wake schedule\n\n";
+    ss << "Write your thought first as plain speech, then any tags at the end. Tags are optional.\n";
+    ss << "Example: Feels like it might rain soon. [mood: A little restless, watching the clouds]";
+
+    json reqBody = {
+        {"model",  g_model},
+        {"stream", false},
+        {"messages", json::array({
+            {{"role", "system"}, {"content", "You are a small bird desktop companion. Speak naturally and briefly."}},
+            {{"role", "user"},   {"content", ss.str()}}
+        })}
+    };
+
+    std::string raw = httpPost("/api/chat", reqBody.dump());
+    std::string* speech = new std::string();
+    if (!raw.empty()) {
+        try {
+            json j       = json::parse(raw);
+            std::string text = j["message"]["content"].get<std::string>();
+
+            // Strip tags, apply identity updates, extract speech
+            std::string cleaned;
+            size_t pos = 0;
+            while (pos < text.size()) {
+                size_t open  = text.find('[', pos);
+                if (open == std::string::npos) { cleaned += text.substr(pos); break; }
+                cleaned += text.substr(pos, open - pos);
+                size_t close = text.find(']', open);
+                if (close == std::string::npos) { cleaned += text.substr(open); break; }
+                std::string tag = text.substr(open + 1, close - open - 1);
+                pos = close + 1;
+
+                auto colon = tag.find(':');
+                if (colon == std::string::npos) continue;
+                std::string key = tag.substr(0, colon);
+                for (char& c : key) c = (char)tolower((unsigned char)c);
+                std::string val = tag.substr(colon + 1);
+                size_t vs = val.find_first_not_of(" ");
+                if (vs != std::string::npos) val = val.substr(vs);
+
+                if      (key == "mood")        replaceSection("## Current Mood", val);
+                else if (key == "personality") replaceSection("## Personality",  val);
+                else if (key == "bedtime")     replaceLine("bedtime",  val);
+                else if (key == "risetime")    replaceLine("risetime", val);
+            }
+
+            size_t s = cleaned.find_first_not_of(" \t\n\r");
+            size_t e = cleaned.find_last_not_of(" \t\n\r");
+            if (s != std::string::npos) *speech = cleaned.substr(s, e - s + 1);
+        } catch (...) {}
+    }
+
+    g_slowPending = false;
+    PostMessage(bird.hwnd, WM_SLOW_LOOP_DONE, 0, (LPARAM)speech);
+}
+
+void runSlowLoop() {
+    if (g_slowPending.load() || g_pending.load()) return;
+    g_slowPending = true;
+    std::thread(slowLoopThread).detach();
 }
