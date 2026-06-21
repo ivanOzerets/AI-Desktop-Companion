@@ -54,8 +54,8 @@ static void advanceAnimation() {
         bird.winX = (int)bird.flyState.destX;
         bird.winY = (int)bird.flyState.destY;
         HDC screenDC = GetDC(NULL);
-        for (int i = 0; i < 3; i++)
-            bird.ledgeRefColors[i] = (uint32_t)GetPixel(screenDC, bird.winX + (i + 1) * W / 4, bird.ledgeY);
+        for (int i = 0; i < LEDGE_VALIDITY_SAMPLES; i++)
+            bird.ledgeRefColors[i] = (uint32_t)GetPixel(screenDC, bird.winX + (i + 1) * W / (LEDGE_VALIDITY_SAMPLES + 1), bird.ledgeY + LEDGE_VALIDITY_Y_OFFSET);
         ReleaseDC(NULL, screenDC);
         bird.animQueue.push_back("idle");  // always settle before next action
         if (bird.isSleeping) {
@@ -322,7 +322,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     uint32_t lastTime      = GetTickCount();
     uint32_t lastAnimTick  = lastTime;
     uint32_t lastSlowLoop  = lastTime;
-    static const uint32_t SLOW_LOOP_INTERVAL = 5 * 60 * 1000;  // 5 minutes
+    static const uint32_t SLOW_LOOP_INTERVAL = 5 * 1000;  // 5 seconds (test)
     MSG      winMsg        = {};
     bool     running       = true;
 

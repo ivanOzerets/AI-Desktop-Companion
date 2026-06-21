@@ -29,8 +29,10 @@ const int   LEDGE_EDGE_THRESHOLD     = 15;
 const int   LEDGE_UNIFORM_THRESHOLD  = 15;
 const int   LEDGE_MIN_SURFACE_WIDTH  = W;
 const int   LEDGE_WIDTH_TOLERANCE    = 20;  // brightness tolerance for surface width scan
-const int   LEDGE_VALIDITY_DRIFT     = 20;  // per-pixel brightness change that flags drift
-const int   LEDGE_VALIDITY_MIN_CHANGES = 2; // how many drifted pixels trigger a re-fly
+const int   LEDGE_VALIDITY_DRIFT       = 25;  // per-pixel brightness change that flags drift
+const int   LEDGE_VALIDITY_SAMPLES     = 5;   // number of points sampled across the ledge
+const int   LEDGE_VALIDITY_MIN_CHANGES = 3;   // how many drifted pixels trigger a re-fly
+const int   LEDGE_VALIDITY_Y_OFFSET    = 5;   // pixels below ledgeY to sample (below bird's foot, sprite is transparent there)
 
 const int   SLEEP_COOLDOWN_MS        = 60000; // cooldown after waking before sleep can re-trigger
 const int   WAKE_INPUT_RECENCY_SECS  = 5;     // max idle seconds to count as "recent input"
@@ -82,7 +84,7 @@ struct BirdState {
     // Ledge
     bool hasLedge = false;
     int ledgeY = 0;
-    uint32_t ledgeRefColors[3] = {};
+    uint32_t ledgeRefColors[LEDGE_VALIDITY_SAMPLES] = {};
 
     // GDI / rendering
     HWND hwnd = NULL;

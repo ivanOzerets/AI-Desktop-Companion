@@ -140,12 +140,17 @@ void startFlySequence() {
 void checkLedgeValidity() {
     if (!bird.hasLedge || bird.flySequenceActive) return;
 
+    static DWORD lastCheck = 0;
+    DWORD now = GetTickCount();
+    if (now - lastCheck < 2000) return;
+    lastCheck = now;
+
     auto lum = [](uint32_t c) { return (GetRValue(c) + GetGValue(c) + GetBValue(c)) / 3; };
 
     HDC screenDC = GetDC(NULL);
     int changed = 0;
-    for (int i = 0; i < 3; i++) {
-        uint32_t cur = (uint32_t)GetPixel(screenDC, bird.winX + (i + 1) * W / 4, bird.ledgeY);
+    for (int i = 0; i < LEDGE_VALIDITY_SAMPLES; i++) {
+        uint32_t cur = (uint32_t)GetPixel(screenDC, bird.winX + (i + 1) * W / (LEDGE_VALIDITY_SAMPLES + 1), bird.ledgeY + LEDGE_VALIDITY_Y_OFFSET);
         if (abs((int)lum(cur) - (int)lum(bird.ledgeRefColors[i])) > LEDGE_VALIDITY_DRIFT) changed++;
     }
     ReleaseDC(NULL, screenDC);

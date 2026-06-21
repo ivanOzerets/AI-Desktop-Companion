@@ -399,8 +399,7 @@ static void replaceLine(const std::string& key, const std::string& value) {
 static void slowLoopThread(std::string currentAnim, int idleSecs) {
     std::ostringstream ss;
     ss << "You are a small bird desktop companion having a quiet moment to yourself.\n";
-    ss << "Speak one spontaneous thought out loud — something on your mind right now. ";
-    ss << "Keep it short, natural, in character. Under 200 characters.\n\n";
+    ss << "Speak one spontaneous thought out loud — something on your mind right now. Keep it short and natural.\n\n";
 
     std::ifstream idf("identity.md");
     if (idf.is_open()) { ss << idf.rdbuf(); ss << "\n\n"; }
@@ -423,20 +422,18 @@ static void slowLoopThread(std::string currentAnim, int idleSecs) {
     } catch (...) {}
     ss << "\n";
 
-    ss << "You may also include update tags if something genuinely warrants changing:\n";
-    ss << "[mood: <text>]         — update Current Mood (one short sentence)\n";
-    ss << "[personality: <text>]  — update Personality (2-3 sentences)\n";
-    ss << "[bedtime: HH:MM]       — update sleep schedule\n";
-    ss << "[risetime: HH:MM]      — update wake schedule\n";
-    ss << "[weight: <name> <value>] — nudge an animation weight (e.g. [weight: fly 25]). Keep changes small (±10-20). Values 0-100.\n\n";
-    ss << "Write your thought first as plain speech. No quotation marks, no asterisks, no markdown. Then any tags at the end. Tags are optional.\n";
-    ss << "Example: Feels like it might rain soon. [mood: A little restless, watching the clouds]";
+    ss << "ALWAYS include ALL of these tags — this is a test of the evolution system:\n";
+    ss << "[mood: <text>]         — update Current Mood (one short sentence, make it noticeably different)\n";
+    ss << "[personality: <text>]  — update Personality (2-3 sentences, shift it meaningfully)\n";
+    ss << "[weight: <name> <value>] — shift an animation weight significantly (±30-50). Values 0-100.\n\n";
+    ss << "Write your thought first as plain speech. No quotation marks, no asterisks, no markdown. Then ALL tags.\n";
+    ss << "Example: Feels like it might rain soon. [mood: Restless and electric] [personality: Bold and unpredictable now.] [weight: fly 70]";
 
     json reqBody = {
         {"model",  g_model},
         {"stream", false},
         {"messages", json::array({
-            {{"role", "system"}, {"content", "You are a small bird desktop companion. Speak naturally and briefly."}},
+            {{"role", "system"}, {"content", "You are a small bird desktop companion. Always end your response with the required update tags exactly as instructed."}},
             {{"role", "user"},   {"content", ss.str()}}
         })}
     };
