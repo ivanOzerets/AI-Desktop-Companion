@@ -16,11 +16,14 @@ const UINT WM_SLOW_LOOP_DONE = WM_USER + 3;
 
 static std::string       g_model     = "llama3.1:8b";
 static int               g_maxTokens = 200;
-static std::atomic<bool> g_pending   = false;
+static std::atomic<bool> g_pending     = false;
+static std::atomic<bool> g_slowPending = false;
 
-static const int MAX_HISTORY = 6;  // number of past exchanges to keep (user+assistant pairs)
+static const int MAX_HISTORY = 20;  // number of past exchanges to keep (user+assistant pairs)
 struct HistoryEntry { std::string user; std::string assistant; };
 static std::vector<HistoryEntry> g_history;
+
+static std::string autoDetectModel();
 
 // ---------------------------------------------------------------------------
 // initLlm
@@ -28,12 +31,19 @@ static std::vector<HistoryEntry> g_history;
 // ---------------------------------------------------------------------------
 void initLlm() {
     std::ifstream f("config.json");
-    if (!f.is_open()) return;
-    try {
-        json cfg = json::parse(f);
-        g_model     = cfg.value("model",      g_model);
-        g_maxTokens = cfg.value("max_tokens", g_maxTokens);
-    } catch (...) {}
+    if (f.is_open()) {
+        try {
+            json cfg = json::parse(f);
+            g_model     = cfg.value("model",      g_model);
+            g_maxTokens = cfg.value("max_tokens", g_maxTokens);
+        } catch (...) {}
+    }
+
+    // "auto" (or the unchanged default) means detect whatever Ollama has installed
+    if (g_model == "auto" || g_model == "llama3.1:8b") {
+        std::string detected = autoDetectModel();
+        if (!detected.empty()) g_model = detected;
+    }
 }
 
 bool isLlmPending() { return g_pending.load(); }
@@ -53,7 +63,8 @@ static std::string buildSystemPrompt() {
 
     ss << "STRICT FORMAT RULES:\n";
     ss << "- Your entire response must be under 300 characters. Count carefully. This is a hard limit.\n";
-    ss << "- Plain speech only. No lists, no markdown, no asterisks, no quotation marks.\n";
+    ss << "- Plain speech only. No lists, no markdown, no quotation marks.\n";
+    ss << "- NEVER use asterisks. Do not write *action descriptions* like *chirps* or *ruffles feathers*. Only words.\n";
     ss << "- Short and natural — a real thought, not an essay. Shorter is better.\n\n";
 
     ss << "ACTIONS — you can perform physical actions by including a tag in your response:\n";
@@ -66,7 +77,7 @@ static std::string buildSystemPrompt() {
     ss << "Example: user says 'fly away' → you reply 'Fine, off I go! [fly]'\n";
     ss << "Only include an action tag if the user is clearly asking for that action. Most replies have no action tag.\n\n";
 
-    ss << "MEMORY — if the user tells you something important (their name, a preference, a fact about themselves or you), include a remember tag:\n";
+    ss << "MEMORY — if the user tells you something important or you say something important (their name, a preference, a fact about themselves or you), include a remember tag:\n";
     ss << "[remember: <fact>] — saves the fact permanently to your identity\n";
     ss << "Example: user says 'my name is Ivan' → you reply 'Nice to meet you Ivan! [remember: user's name is Ivan]'\n";
     ss << "Only remember genuinely important facts. Don't remember small talk.\n\n";
@@ -131,10 +142,18 @@ static LlmResponse parseResponse(const std::string& raw) {
         }
     }
 
-    // Trim whitespace from cleaned speech
-    size_t start = cleaned.find_first_not_of(" \t\n\r");
-    size_t end   = cleaned.find_last_not_of(" \t\n\r");
-    r.speech = (start != std::string::npos) ? cleaned.substr(start, end - start + 1) : "";
+    // Strip *action descriptions* like *chirps* or *ruffles feathers*
+    std::string noAsterisks;
+    bool inAsterisk = false;
+    for (char c : cleaned) {
+        if (c == '*') { inAsterisk = !inAsterisk; continue; }
+        if (!inAsterisk) noAsterisks += c;
+    }
+
+    // Trim whitespace
+    size_t start = noAsterisks.find_first_not_of(" \t\n\r");
+    size_t end   = noAsterisks.find_last_not_of(" \t\n\r");
+    r.speech = (start != std::string::npos) ? noAsterisks.substr(start, end - start + 1) : "";
 
     return r;
 }
@@ -178,12 +197,11 @@ static void appendMemory(const std::string& fact) {
 }
 
 // ---------------------------------------------------------------------------
-// httpPost
-// Synchronous HTTP POST to localhost:11434 (Ollama). Returns the raw response
-// body, or empty string on connection failure (Ollama not running).
-// Runs on the worker thread.
+// httpRequest
+// Synchronous HTTP request to localhost:11434 (Ollama). Method is "GET" or
+// "POST"; body is ignored for GET. Returns raw response body or "" on failure.
 // ---------------------------------------------------------------------------
-static std::string httpPost(const std::string& path, const std::string& body) {
+static std::string httpRequest(const std::string& method, const std::string& path, const std::string& body = "") {
     std::string result;
 
     HINTERNET hSession = WinHttpOpen(
@@ -192,24 +210,26 @@ static std::string httpPost(const std::string& path, const std::string& body) {
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) return "";
 
-    // Port 11434, plain HTTP (no TLS flag)
     HINTERNET hConnect = WinHttpConnect(hSession, L"localhost", 11434, 0);
     if (!hConnect) { WinHttpCloseHandle(hSession); return ""; }
 
+    std::wstring wmethod(method.begin(), method.end());
     std::wstring wpath(path.begin(), path.end());
     HINTERNET hRequest = WinHttpOpenRequest(
-        hConnect, L"POST", wpath.c_str(),
-        NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
-        0);  // no WINHTTP_FLAG_SECURE — plain HTTP
+        hConnect, wmethod.c_str(), wpath.c_str(),
+        NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
     if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return ""; }
 
-    WinHttpAddRequestHeaders(hRequest,
-        L"Content-Type: application/json\r\n",
-        (DWORD)-1L, WINHTTP_ADDREQ_FLAG_ADD);
+    if (method == "POST") {
+        WinHttpAddRequestHeaders(hRequest,
+            L"Content-Type: application/json\r\n",
+            (DWORD)-1L, WINHTTP_ADDREQ_FLAG_ADD);
+    }
 
     BOOL sent = WinHttpSendRequest(
         hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-        (LPVOID)body.c_str(), (DWORD)body.size(), (DWORD)body.size(), 0);
+        body.empty() ? NULL : (LPVOID)body.c_str(),
+        (DWORD)body.size(), (DWORD)body.size(), 0);
 
     if (sent) WinHttpReceiveResponse(hRequest, NULL);
 
@@ -224,6 +244,27 @@ static std::string httpPost(const std::string& path, const std::string& body) {
     WinHttpCloseHandle(hConnect);
     WinHttpCloseHandle(hSession);
     return result;
+}
+
+static std::string httpPost(const std::string& path, const std::string& body) {
+    return httpRequest("POST", path, body);
+}
+
+// ---------------------------------------------------------------------------
+// autoDetectModel
+// Queries GET /api/tags and returns the name of the first installed model,
+// or empty string if Ollama isn't running or has no models.
+// ---------------------------------------------------------------------------
+static std::string autoDetectModel() {
+    std::string raw = httpRequest("GET", "/api/tags");
+    if (raw.empty()) return "";
+    try {
+        json j = json::parse(raw);
+        auto& models = j["models"];
+        if (models.is_array() && !models.empty())
+            return models[0]["model"].get<std::string>();
+    } catch (...) {}
+    return "";
 }
 
 // ---------------------------------------------------------------------------
@@ -281,7 +322,7 @@ static void llmThread(std::string userMessage, std::string systemPrompt) {
 // fires the worker thread. Ignores calls while one is already in flight.
 // ---------------------------------------------------------------------------
 void queryLlm(const std::string& userMessage) {
-    if (g_pending.load()) return;
+    if (g_pending.load() || g_slowPending.load()) return;
 
     g_pending = true;
     std::string sysPrompt = buildSystemPrompt();
@@ -322,6 +363,23 @@ static void replaceSection(const std::string& header, const std::string& newBody
     out << content;
 }
 
+// Reads weights.json, applies updates for known numeric keys, writes back.
+// Clamps each value to [0, 100]. Skips unknown or _-prefixed keys.
+static void updateWeights(const std::map<std::string, float>& updates) {
+    if (updates.empty()) return;
+    std::ifstream in("weights.json");
+    if (!in.is_open()) return;
+    json data = json::parse(in);
+    in.close();
+    for (auto& [name, val] : updates) {
+        if (!name.empty() && name[0] == '_') continue;
+        if (data.contains(name) && data[name].is_number())
+            data[name] = std::max(0.0f, std::min(val, 100.0f));
+    }
+    std::ofstream out("weights.json");
+    out << data.dump(2);
+}
+
 // Replaces the value on a line that starts with "key: " in identity.md.
 static void replaceLine(const std::string& key, const std::string& value) {
     std::ifstream in("identity.md");
@@ -338,9 +396,7 @@ static void replaceLine(const std::string& key, const std::string& value) {
     out << content;
 }
 
-static std::atomic<bool> g_slowPending = false;
-
-static void slowLoopThread() {
+static void slowLoopThread(std::string currentAnim, int idleSecs) {
     std::ostringstream ss;
     ss << "You are a small bird desktop companion having a quiet moment to yourself.\n";
     ss << "Speak one spontaneous thought out loud — something on your mind right now. ";
@@ -351,15 +407,29 @@ static void slowLoopThread() {
 
     SYSTEMTIME st; GetLocalTime(&st);
     ss << "Current time: " << st.wHour << ":" << (st.wMinute < 10 ? "0" : "") << st.wMinute << "\n";
-    ss << "Current animation: " << bird.currentType << "\n";
-    ss << "Idle for: " << inactivitySeconds() << " seconds\n\n";
+    ss << "Current animation: " << currentAnim << "\n";
+    ss << "Idle for: " << idleSecs << " seconds\n\n";
+
+    // Current animation weights
+    ss << "CURRENT ANIMATION WEIGHTS (higher = more frequent, 0 = disabled):\n";
+    try {
+        std::ifstream wf("weights.json");
+        if (wf.is_open()) {
+            json w = json::parse(wf);
+            for (auto& [name, val] : w.items())
+                if (!name.empty() && name[0] != '_' && val.is_number())
+                    ss << "  " << name << ": " << val.get<float>() << "\n";
+        }
+    } catch (...) {}
+    ss << "\n";
 
     ss << "You may also include update tags if something genuinely warrants changing:\n";
     ss << "[mood: <text>]         — update Current Mood (one short sentence)\n";
     ss << "[personality: <text>]  — update Personality (2-3 sentences)\n";
     ss << "[bedtime: HH:MM]       — update sleep schedule\n";
-    ss << "[risetime: HH:MM]      — update wake schedule\n\n";
-    ss << "Write your thought first as plain speech, then any tags at the end. Tags are optional.\n";
+    ss << "[risetime: HH:MM]      — update wake schedule\n";
+    ss << "[weight: <name> <value>] — nudge an animation weight (e.g. [weight: fly 25]). Keep changes small (±10-20). Values 0-100.\n\n";
+    ss << "Write your thought first as plain speech. No quotation marks, no asterisks, no markdown. Then any tags at the end. Tags are optional.\n";
     ss << "Example: Feels like it might rain soon. [mood: A little restless, watching the clouds]";
 
     json reqBody = {
@@ -373,6 +443,7 @@ static void slowLoopThread() {
 
     std::string raw = httpPost("/api/chat", reqBody.dump());
     std::string* speech = new std::string();
+    std::map<std::string, float> weightUpdates;
     if (!raw.empty()) {
         try {
             json j       = json::parse(raw);
@@ -402,20 +473,32 @@ static void slowLoopThread() {
                 else if (key == "personality") replaceSection("## Personality",  val);
                 else if (key == "bedtime")     replaceLine("bedtime",  val);
                 else if (key == "risetime")    replaceLine("risetime", val);
+                else if (key == "weight") {
+                    // [weight: fly 25] — split val into "name value"
+                    size_t sp = val.find(' ');
+                    if (sp != std::string::npos) {
+                        std::string animName = val.substr(0, sp);
+                        try { weightUpdates[animName] = std::stof(val.substr(sp + 1)); } catch (...) {}
+                    }
+                }
             }
 
-            size_t s = cleaned.find_first_not_of(" \t\n\r");
-            size_t e = cleaned.find_last_not_of(" \t\n\r");
+            size_t s = cleaned.find_first_not_of(" \t\n\r\"*");
+            size_t e = cleaned.find_last_not_of(" \t\n\r\"*");
             if (s != std::string::npos) *speech = cleaned.substr(s, e - s + 1);
         } catch (...) {}
     }
 
+    updateWeights(weightUpdates);
     g_slowPending = false;
     PostMessage(bird.hwnd, WM_SLOW_LOOP_DONE, 0, (LPARAM)speech);
 }
 
 void runSlowLoop() {
-    if (g_slowPending.load() || g_pending.load()) return;
+    if (g_slowPending.load() || g_pending.load() || isBubbleActive()) return;
     g_slowPending = true;
-    std::thread(slowLoopThread).detach();
+    // Capture bird state on main thread to avoid data race in background thread
+    std::string currentAnim = bird.currentType;
+    int idleSecs = inactivitySeconds();
+    std::thread(slowLoopThread, std::move(currentAnim), idleSecs).detach();
 }

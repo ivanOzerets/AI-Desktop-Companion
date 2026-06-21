@@ -51,10 +51,13 @@ static void advanceAnimation() {
     if (bird.currentType == "landing") {
         bird.flySequenceActive = false;
         bird.hasLedge = true;
+        bird.winX = (int)bird.flyState.destX;
+        bird.winY = (int)bird.flyState.destY;
         HDC screenDC = GetDC(NULL);
         for (int i = 0; i < 3; i++)
             bird.ledgeRefColors[i] = (uint32_t)GetPixel(screenDC, bird.winX + (i + 1) * W / 4, bird.ledgeY);
         ReleaseDC(NULL, screenDC);
+        bird.animQueue.push_back("idle");  // always settle before next action
         if (bird.isSleeping) {
             bird.animQueue.clear();
             bird.animQueue.push_back("dozing_off");
@@ -62,13 +65,11 @@ static void advanceAnimation() {
         }
     }
 
-    // Loop sleeping animation while in sleep state
-    if (bird.currentType == "sleeping" && bird.isSleeping)
-        bird.animQueue.push_front("sleeping");
-
     std::string nextType;
     if (!bird.animQueue.empty()) {
         nextType = bird.animQueue.front(); bird.animQueue.pop_front();
+    } else if (bird.currentType == "sleeping" && bird.isSleeping) {
+        nextType = "sleeping";  // loop sleeping only when queue is empty and still asleep
     } else {
         nextType = pickAnimation();
     }
@@ -96,8 +97,16 @@ static void advanceAnimation() {
         int hopDist    = airborneCount * HOP_STEP_PX;
         int destCenter = bird.winX + W / 2 + (bird.facing == FACING_RIGHT ? hopDist : -hopDist);
         int leadEdge   = destCenter + (bird.facing == FACING_RIGHT ? (W/2 - 10) : -(W/2 - 10));
-        if (!checkLedgeWidth(destCenter, bird.ledgeY, W) ||
-            !checkLedgeWidth(leadEdge, bird.ledgeY, 20)) {
+
+        // Use findLedgeAtX to confirm a real ledge surface exists at both points,
+        // at the same Y the bird is currently standing on (within tolerance).
+        // checkLedgeWidth was checking color consistency only, which passes for open air too.
+        int centerY = findLedgeAtX(destCenter);
+        int leadY   = findLedgeAtX(leadEdge);
+        bool centerOk = (centerY >= 0 && abs(centerY - bird.ledgeY) <= 20);
+        bool leadOk   = (leadY   >= 0 && abs(leadY   - bird.ledgeY) <= 20);
+
+        if (!centerOk || !leadOk) {
             bird.currentType       = "idle";
             bird.currentVariantIdx = pickVariant("idle");
         }
@@ -144,8 +153,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (resp->action == "fly") {
             bird.animQueue.push_back("fly");
         } else if (resp->action == "sleep") {
-            bird.animQueue.push_back("dozing_off");
-            bird.animQueue.push_back("sleeping");
+            enterSleep();
         } else if (resp->action == "dance") {
             bird.animQueue.push_back("dancing");
         } else if (resp->action == "sing") {
@@ -160,6 +168,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     if (msg == WM_SLOW_LOOP_DONE) {
         loadIdentityTimes();
+        loadWeights();
         std::string* speech = reinterpret_cast<std::string*>(lp);
         if (speech && !speech->empty()) showBubble(*speech);
         delete speech;
@@ -193,6 +202,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_NCHITTEST)
         return bird.mouseOverBird ? HTCLIENT : HTTRANSPARENT;
 
+    if (msg == WM_SETCURSOR) {
+        if (bird.mouseOverBird) {
+            SetCursor(LoadCursor(NULL, IDC_HAND));
+            return TRUE;
+        }
+    }
+
     if (msg == WM_MOUSEMOVE) {
         if (bird.flySequenceActive || isNighttime()) return 0;
         int x = (int)(short)LOWORD(lp);
@@ -225,11 +241,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     if (msg == WM_LBUTTONUP) {
         if (!bird.flySequenceActive) {
-            bird.isSleeping = false;
-            bird.sleepCooldownEnd = GetTickCount() + SLEEP_COOLDOWN_MS;
-            bird.animQueue.clear();
             hideBubble();
-            startFlySequence();
+            if (bird.isSleeping) {
+                wakeUp();
+                bird.animQueue.push_back("fly");  // fly after awoken finishes
+            } else {
+                startFlySequence();
+            }
             bird.companionTracker = CompanionTracker{};
         }
         return 0;
@@ -286,7 +304,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     bird.trayIcon.uID              = 1;
     bird.trayIcon.uFlags           = NIF_ICON | NIF_TIP | NIF_MESSAGE;
     bird.trayIcon.uCallbackMessage = WM_TRAYICON;
-    bird.trayIcon.hIcon            = LoadIcon(NULL, IDI_APPLICATION);
+    bird.trayIcon.hIcon            = (HICON)LoadImage(NULL, "bird-icon.ico", IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
     strcpy(bird.trayIcon.szTip, "AI Desktop Companion");
     Shell_NotifyIcon(NIM_ADD, &bird.trayIcon);
 

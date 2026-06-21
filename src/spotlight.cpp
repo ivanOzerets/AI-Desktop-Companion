@@ -50,9 +50,9 @@ static LRESULT CALLBACK editSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
             return 0;
         }
     }
-    // Block WM_CHAR 0x7F — Ctrl+Backspace on some systems sends this as a
-    // literal DEL character instead of deleting a word. Already handled above.
-    if (msg == WM_CHAR && wp == 0x7F) return 0;
+    // Block WM_CHAR for Enter and Ctrl+Backspace — the single-line EDIT control
+    // beeps when it receives characters it can't insert (0x0D, 0x7F).
+    if (msg == WM_CHAR && (wp == '\r' || wp == 0x7F)) return 0;
 
     return CallWindowProc(g_editProc, hwnd, msg, wp, lp);
 }

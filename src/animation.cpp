@@ -52,8 +52,10 @@ void loadWeights() {
     std::ifstream f("weights.json");
     json data = json::parse(f);
     bird.weights.clear();
-    for (auto& [name, val] : data.items())
-        bird.weights[name] = val.get<float>();
+    for (auto& [name, val] : data.items()) {
+        if (!name.empty() && name[0] == '_') continue;
+        if (val.is_number()) bird.weights[name] = val.get<float>();
+    }
 }
 
 void loadAnimations() {

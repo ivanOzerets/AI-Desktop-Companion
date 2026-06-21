@@ -1,9 +1,10 @@
 {
-  "idle":             80,
-  "pecking":          20,
-  "sleeping":          0,
-  "fly":              15,
+  "_note": "Higher value = more frequent. Set to 0 to disable. The slow loop may shift these over time based on mood and personality.",
   "flapping_in_place": 0,
-  "hop":              40,
-  "turnaround":       10
+  "fly": 0,
+  "hop": 40,
+  "idle": 80,
+  "pecking": 35.0,
+  "sleeping": 0,
+  "turnaround": 10
 }
