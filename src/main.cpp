@@ -162,6 +162,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             bird.animQueue.push_back("yawning");
         } else if (resp->action == "flap") {
             bird.animQueue.push_back("flapping_in_place");
+        } else if (resp->action == "peck") {
+            bird.animQueue.push_back("pecking");
         }
         delete resp;
         return 0;
@@ -322,7 +324,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     uint32_t lastTime      = GetTickCount();
     uint32_t lastAnimTick  = lastTime;
     uint32_t lastSlowLoop  = lastTime;
-    static const uint32_t SLOW_LOOP_INTERVAL = 5 * 1000;  // 5 seconds (test)
+    static const uint32_t SLOW_LOOP_INTERVAL = 5 * 60 * 1000;  // 5 minutes
     MSG      winMsg        = {};
     bool     running       = true;
 

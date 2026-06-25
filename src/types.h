@@ -106,6 +106,7 @@ struct BirdState {
     int bedtimeMinutes  = 22 * 60;
     int risetimeMinutes = 7 * 60;
     uint32_t sleepCooldownEnd = 0;
+    uint32_t sleepStartTime   = 0;
 };
 
 extern BirdState bird;

@@ -41,6 +41,7 @@ int inactivitySeconds() {
 
 void enterSleep() {
     bird.isSleeping = true;
+    bird.sleepStartTime = GetTickCount();
     bird.animQueue.clear();
     bird.animQueue.push_back("dozing_off");
     bird.animQueue.push_back("sleeping");
@@ -58,8 +59,9 @@ void updateSleepState() {
     if (bird.flySequenceActive) return;
     uint32_t now = GetTickCount();
     if (bird.isSleeping) {
-        // Daytime: any recent input wakes the bird
-        if (!isNighttime() && inactivitySeconds() < WAKE_INPUT_RECENCY_SECS)
+        // Daytime: any recent input wakes the bird, but not within 8s of falling asleep
+        if (!isNighttime() && inactivitySeconds() < WAKE_INPUT_RECENCY_SECS
+            && now - bird.sleepStartTime > 8000)
             wakeUp();
         // Night: stays asleep until clicked or chat command
     } else {
