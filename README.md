@@ -24,7 +24,7 @@ A small bird that lives on your desktop. A locally-run LLM drives its personalit
 
 **Ollama**
 
-1. Download and install Ollama from [ollama.com](https://ollama.com)
+1. Download and install [Ollama](https://ollama.com)
 2. Pull a model — `ollama pull gemma2:9b`
 3. The bird auto-detects your latest model, or pin a specific one in `config.json`
 
