@@ -4,7 +4,7 @@ SRCS     = src/main.cpp src/animation.cpp src/ledge.cpp src/flight.cpp src/sleep
 OBJS     = $(SRCS:.cpp=.o)
 INCLUDES = -I lib/json
 CXXFLAGS = -std=c++17 $(INCLUDES)
-LIBS     = -mwindows -lwinhttp
+LIBS     = -mwindows -lwinhttp -static -static-libgcc -static-libstdc++
 
 $(TARGET): $(OBJS)
 	$(CXX) $(OBJS) -o $(TARGET) $(LIBS)

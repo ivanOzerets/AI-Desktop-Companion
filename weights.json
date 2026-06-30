@@ -1,11 +1,11 @@
 {
   "idle": 60,
-  "pecking": 0,
-  "hop": 40,
-  "turnaround": 40,
-  "yawning": 0,
-  "flapping_in_place": 0,
-  "fly": 0,
-  "dozing_off": 0,
+  "pecking": 20,
+  "hop": 20,
+  "turnaround": 15,
+  "yawning": 10,
+  "flapping_in_place": 10,
+  "fly": 20,
+  "dozing_off": 5,
   "sleeping": 0
 }
